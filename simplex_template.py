@@ -77,7 +77,7 @@ def Phase1(c, A, b):
     if x0 in basis:
         r = basis.index(x0)
         candidates = [j for j in range(n + m)
-                      if (j not in basis) and (abs(A[r, j]) > eps)]
+                      if (j not in basis) and (abs(new_A[r, j]) > eps)]
         enter = min(candidates)
         basis[r] = enter
 
