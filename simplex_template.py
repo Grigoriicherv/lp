@@ -3,80 +3,110 @@ import sys
 import argparse
 
 # global vars
-eps = 0.00001
+eps = 1e-9
+
+# Формула Шермана-Моррисона
+def _update(B_inv, d, p):
+    rp = B_inv[p, :].copy()
+    for i in range(B_inv.shape[0]):
+        if i != p:
+            B_inv[i, :] -= (d[i] / d[p]) * rp
+    B_inv[p, :] = rp / d[p]
+    return B_inv
 
 def PrimalSimplex(c, A, b, basis=None, nbasis=None):
-    #  max c^T x
-    #  Ax = b
-    #  x >= 0
-    #  n - число переменных
-    #  m - число ограничений
-    #  Да, действительно, считаем что n > m (с учетом слаков)
-    # Предполагаем что проблема точно feasible но возможно unbounded
     m, n = A.shape
-    n -= m
+    n = n - m
     if basis is None or nbasis is None:
         basis = list(range(n, n + m))
         nbasis = list(range(0, n))
 
+    B_inv = np.linalg.inv(A[:, basis])
+
     while True:
-        # Подсказка: np.linalg.solve(M, v) решает систему Mx = v
+        B = A[:, basis]
+        N = A[:, nbasis]
 
-        # TODO: Посчитать reduced cost's 
-        reduced_cost = ...
+        x_B = B_inv @ b
+        y = B_inv.T @ c[basis]
+        reduced_cost = c[nbasis] - N.T @ y
 
-        # TODO: Находим кандидата для входа в базис
-        entering_index = ...
+        rc = np.where(reduced_cost > eps)[0]
+        if rc.size == 0:
+            x = np.zeros(n + m)
+            x[basis] = x_B
+            z = float(c @ x)
+            return "optimal", x, z
 
-        # TODO: Вычисляем направление, не забывая детектировать unbounded
-        d = ...
+        j_in = rc[np.argmin(np.array(nbasis)[rc])]
+        entering = nbasis[j_in]
+        a_j = A[:, entering]
+        d = B_inv @ a_j
+        if not np.any(d > eps):
+            return "unbounded", None, None
 
-        # TODO: Найти кандидата для выхода из базиса
-        leaving_index = ...
-        
-        # TODO: Обновляем basis и nbasis
-        basis = ...
-        nbasis = ...
+        pos = np.where(d > eps)[0]
+        ratios = x_B[pos] / d[pos]
+        min_ratio = ratios.min()
+        tie = np.where(np.abs(ratios - min_ratio) <= eps)[0]
+        pretendents = pos[tie]
+        i_out = pretendents[np.argmin(np.array(basis)[pretendents])]
+        leaving = basis[i_out]
+        basis[i_out] = entering
+        nbasis[j_in] = leaving
 
-    # TODO: Восстановить исходную систему, восстановить x и вернуть результат
-    return "optimal", ..., ...
+        B_inv = _update(B_inv, d, i_out)
 
 
 def Phase1(c, A, b):
-    # TODO: Создаем вспомогательную задачу
-    new_c = ...
-    new_A = ...
-    basis = ...
-    nbasis = ...
+    m, n = A.shape
+    x0 = n + m
 
-    status, x, obj = PrimalSimplex(new_c, new_A, b, basis, nbasis)
-    if status != "optimal" or obj > eps:
+    new_A = np.hstack([A, np.eye(m), -np.ones((m, 1))])
+    new_c = np.concatenate([np.zeros(n + m), np.array([-1.0])])
+
+    basis = list(range(n, n + m))
+    r = int(np.argmin(b))
+    basis[r] = x0
+    nbasis = [j for j in range(n + m + 1) if j not in basis]
+
+    status, _, tar = PrimalSimplex(new_c, new_A, b, basis, nbasis)
+    if status != "optimal" or tar < -eps:
         return "infeasible", None, None
-    
-    # TODO: Нужно восстановить исходную задачу
-    c = ...
-    A = ...
-    basis = ...
-    nbasis = ...
+
+    if x0 in basis:
+        r = basis.index(x0)
+        candidates = [j for j in range(n + m)
+                      if (j not in basis) and (abs(A[r, j]) > eps)]
+        enter = min(candidates)
+        basis[r] = enter
+
+    A = np.hstack([A, np.eye(m)])
+    c = np.concatenate([c, np.zeros(m)])
+
+    basis = [j for j in basis]
+    nbasis = [j for j in range(n+m) if j not in basis]
 
     return PrimalSimplex(c, A, b, basis, nbasis)
 
 
 def Solve(c, A, b):
     if np.all(b >= 0):
-        # TODO: Добавляем слаки в систему
+        m = A.shape[0]
+        A = np.hstack([A, np.eye(m)])
+        c = np.concatenate([c, np.zeros(m)])
         return PrimalSimplex(c, A, b)
-    
-    # Иначе запускаем фазу 1
+
     return Phase1(c, A, b)
+
 
 def proc_cmd():
     parser = argparse.ArgumentParser(description="Solve a linear program using the Primal Simplex method.")
     parser.add_argument("filename", type=str, help="Input file containing the LP problem.")
     return parser.parse_args()
 
+
 def main():
-    # boilerplate for reading input data
     args = proc_cmd()
     with open(args.filename, 'r', encoding='utf-8') as f:
         n, m = map(int, f.readline().split())
@@ -106,6 +136,7 @@ def main():
         print("The problem is unbounded.")
     else:
         print("No solution found.")
+
 
 if __name__ == '__main__':
     main()
